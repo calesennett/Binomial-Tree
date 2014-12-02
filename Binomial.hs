@@ -9,43 +9,54 @@ module Binomial
 
 import           Option
 import           Data.Matrix
-import qualified Data.Map as Map
+import           Data.MemoUgly
 
 main =  do
         let option  = Option { optionType="call"
                              , stock=31.25
-                             , strike=22.75
+                             , strike=30.00
                              , riskFree=0.07
-                             , time=0.08333333333
+                             , time=0.1
                              , vol=0.5
                              , divYield=0.0
                              }
-            steps       = 16
+            steps       = 22
+            rf          = riskFree option
+            dt          = deltaT option steps
+            p           = prob option steps
             priceTree   = fromList steps steps $ map (genPrice steps option) (pairs [0..(steps - 1)])
-            finals      = fromList steps steps $ map (finalVals option steps priceTree) (pairs [0..(steps - 1)])
-        print $ optionVal option steps (0,0) finals (finalNodes steps)
+            finals      = toLists $ fromList steps steps $ map (finalVals option steps priceTree) (pairs [0..(steps - 1)])
+        print $ optionVal rf dt p steps (0,0) finals (finalNodes steps)
 
 optionVal
-    :: Option
+    :: Double
+    -> Double
+    -> Double
     -> Int
     -> (Int, Int)
-    -> Matrix Double
+    -> [[Double]]
     -> [(Int, Int)]
     -> Double
 optionVal
-    option
+    rf
+    dt
+    p
     steps
     (downs, ups)
     finalOpts
-    leaves
-    | (downs, ups) `elem` leaves = (!) finalOpts (downs+1, ups+1)
-    | otherwise = exp (-(riskFree option) * (deltaT option steps)) * (((prob option steps) * (optionVal option steps (downs, ups+1) finalOpts leaves))
-                                                             +  ((1 - (prob option steps)) * (optionVal option steps (downs+1, ups) finalOpts leaves)))
-        --where optionVal' o s (d, u) finalOpts leaves vs = let val = Map.lookup (show d ++ "," ++ show u) vs
-        --                                           in if (fromMaybe 0.0 val) == 0.0
-        --                                              then let memos = Map.insert (show d ++ "," ++ show u) (optionVal o s (d, u) finalOpts leaves vs) vs
-        --                                                   in (optionVal o s (d, u) finalOpts leaves memos)
-        --                                              else (fromMaybe 0.0 val)
+    leaves =  memo optionVal' rf dt p steps (downs, ups) finalOpts leaves
+                 where
+                 optionVal'
+                    rf
+                    dt
+                    p
+                    steps
+                    (downs, ups)
+                    finalOpts
+                    leaves
+                    | (downs, ups) `elem` leaves = finalOpts !! downs !! ups
+                    | otherwise = exp (-rf * dt) * ((p * (optionVal rf dt p steps (ups+1, downs) finalOpts leaves))
+                                                                 +  ((1.0 - p) * (optionVal rf dt p steps (ups, downs+1) finalOpts leaves)))
 
 finalVals
     :: Option
@@ -59,8 +70,8 @@ finalVals
     prices
     (i, j)
     | (i, j) `elem` (finalNodes steps) = if (optionType option) == "call"
-                                         then (!) prices (i+1, j+1) - strike option
-                                         else strike option - (!) prices (i+1, j+1)
+                                         then maximum [0.0, (!) prices (i+1, j+1) - strike option]
+                                         else maximum [0.0, strike option - (!) prices (i+1, j+1)]
     | otherwise                        = 0
 
 finalNodes
